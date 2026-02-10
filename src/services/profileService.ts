@@ -1,4 +1,9 @@
 import { authService } from './authService';
+import { 
+  staticProfile, 
+  staticClinicSettings, 
+  staticActivityStats 
+} from '@/data/staticData';
 
 const API_BASE_URL = ((import.meta as any)?.env?.VITE_API_BASE_URL as string) || 'http://localhost:5000/api';
 
@@ -96,17 +101,13 @@ class ProfileService {
   // Obtener perfil del usuario actual
   async getProfile(): Promise<{ success: boolean; data: UserProfile }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/profile`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener perfil');
-      }
-
-      return data;
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      return {
+        success: true,
+        data: staticProfile
+      };
     } catch (error) {
       console.error('Error fetching profile:', error);
       throw error;
@@ -116,19 +117,30 @@ class ProfileService {
   // Actualizar perfil del usuario
   async updateProfile(profileData: UpdateProfileRequest): Promise<{ success: boolean; data: UserProfile; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/profile`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(profileData),
-      });
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      // Actualizar datos estáticos (simulación)
+      const updatedProfile = {
+        ...staticProfile,
+        fullName: profileData.fullName || staticProfile.fullName,
+        email: profileData.email || staticProfile.email,
+        profile: {
+          ...staticProfile.profile,
+          phone: profileData.profile?.phone || staticProfile.profile.phone,
+          address: profileData.profile?.address || staticProfile.profile.address,
+          specialty: profileData.profile?.specialty || staticProfile.profile.specialty,
+          professionalLicense: profileData.profile?.professionalLicense || staticProfile.profile.professionalLicense,
+          bio: profileData.profile?.bio || staticProfile.profile.bio,
+        },
+        updatedAt: new Date().toISOString()
+      };
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar perfil');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: updatedProfile,
+        message: "Perfil actualizado correctamente"
+      };
     } catch (error) {
       console.error('Error updating profile:', error);
       throw error;
@@ -138,19 +150,18 @@ class ProfileService {
   // Actualizar pregunta de seguridad
   async updateSecurityQuestion(securityData: UpdateSecurityQuestionRequest): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/profile/security-question`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(securityData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar pregunta de seguridad');
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 600));
+      
+      // Validar contraseña actual (simulación)
+      if (securityData.currentPassword !== 'doctor123') {
+        throw new Error('Contraseña actual incorrecta');
       }
 
-      return data;
+      return {
+        success: true,
+        message: "Pregunta de seguridad actualizada correctamente"
+      };
     } catch (error) {
       console.error('Error updating security question:', error);
       throw error;
@@ -160,17 +171,13 @@ class ProfileService {
   // Obtener configuración de la clínica
   async getClinicSettings(): Promise<{ success: boolean; data: ClinicSettings }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/profile/clinic-settings`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener configuración de clínica');
-      }
-
-      return data;
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 400));
+      
+      return {
+        success: true,
+        data: staticClinicSettings
+      };
     } catch (error) {
       console.error('Error fetching clinic settings:', error);
       throw error;
@@ -180,19 +187,27 @@ class ProfileService {
   // Actualizar configuración de la clínica
   async updateClinicSettings(settingsData: UpdateClinicSettingsRequest): Promise<{ success: boolean; data: UserProfile; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/profile/clinic-settings`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(settingsData),
-      });
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 700));
+      
+      const updatedProfile = {
+        ...staticProfile,
+        profile: {
+          ...staticProfile.profile,
+          specialty: settingsData.dentist?.specialty || staticProfile.profile.specialty,
+          professionalLicense: settingsData.dentist?.license || staticProfile.profile.professionalLicense,
+          bio: settingsData.dentist?.bio || staticProfile.profile.bio,
+          phone: settingsData.contact?.phone || staticProfile.profile.phone,
+          address: settingsData.contact?.address || staticProfile.profile.address,
+        },
+        updatedAt: new Date().toISOString()
+      };
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar configuración de clínica');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: updatedProfile,
+        message: "Configuración de clínica actualizada correctamente"
+      };
     } catch (error) {
       console.error('Error updating clinic settings:', error);
       throw error;
@@ -202,42 +217,39 @@ class ProfileService {
   // Obtener estadísticas de actividad
   async getActivityStats(): Promise<{ success: boolean; data: ActivityStats }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/profile/activity-stats`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener estadísticas de actividad');
-      }
-
-      return data;
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      return {
+        success: true,
+        data: staticActivityStats
+      };
     } catch (error) {
       console.error('Error fetching activity stats:', error);
       throw error;
     }
   }
 
-  // Cambiar contraseña (desde authService pero lo exponemos aquí también)
+  // Cambiar contraseña
   async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify({
-          currentPassword,
-          newPassword
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al cambiar contraseña');
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      // Validar contraseña actual (simulación)
+      if (currentPassword !== 'doctor123') {
+        throw new Error('Contraseña actual incorrecta');
+      }
+      
+      // Validar nueva contraseña
+      if (newPassword.length < 6) {
+        throw new Error('La nueva contraseña debe tener al menos 6 caracteres');
       }
 
-      return data;
+      return {
+        success: true,
+        message: "Contraseña actualizada correctamente"
+      };
     } catch (error) {
       console.error('Error changing password:', error);
       throw error;

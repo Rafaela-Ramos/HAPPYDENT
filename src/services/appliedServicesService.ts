@@ -2,10 +2,11 @@ import { authService } from './authService';
 import { Appointment } from './appointmentService';
 import { Patient } from './patientService';
 import { DentalService } from './servicesService';
+import { staticAppliedServices, staticAppointments, staticPatients, staticServices } from '@/data/staticData';
 
 const API_BASE_URL = ((import.meta as any)?.env?.VITE_API_BASE_URL as string) || 'http://localhost:5000/api';
 
-// New AppliedService interface that matches the frontend expectations
+// New AppliedService interface that matches frontend expectations
 export interface AppliedService {
   _id: string;
   appointment: {
@@ -126,61 +127,116 @@ class AppliedServicesService {
     search?: string;
   } = {}): Promise<AppliedServicesListResponse> {
     try {
-      const queryParams = new URLSearchParams();
-      
-      if (params.page) queryParams.append('page', params.page.toString());
-      if (params.limit) queryParams.append('limit', params.limit.toString());
-      if (params.status) queryParams.append('status', params.status);
-      if (params.patient) queryParams.append('patient', params.patient);
-      if (params.date) queryParams.append('date', params.date);
-      if (params.search) queryParams.append('search', params.search);
-
-      const response = await fetch(`${API_BASE_URL}/applied-services?${queryParams}`, {
-        headers: authService.getAuthHeaders(),
+      // Modo estático - usar datos locales
+      let filteredServices = staticAppliedServices.map(service => {
+        const patient = staticPatients.find(p => p.id === service.patientId);
+        const appointment = staticAppointments.find(a => a.id === service.appointmentId);
+        
+        return {
+          _id: service.id,
+          appointment: {
+            _id: service.appointmentId,
+            patient: {
+              _id: patient?.id || '',
+              dni: patient?.id || '',
+              firstName: patient?.firstName || '',
+              lastName: patient?.lastName || '',
+              fullName: `${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(),
+              email: patient?.email || '',
+              phone: patient?.phone || '',
+              address: {
+                street: patient?.address || '',
+                city: '',
+                state: '',
+                zipCode: '',
+                country: ''
+              },
+              dateOfBirth: patient?.dateOfBirth || '',
+              gender: (patient?.gender === 'Masculino' ? 'masculino' : patient?.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+              emergencyContact: patient?.emergencyContact,
+              medicalHistory: {
+                allergies: patient?.medicalHistory.allergies ? [patient.medicalHistory.allergies] : [],
+                medications: patient?.medicalHistory.medications ? [patient.medicalHistory.medications] : [],
+                diseases: patient?.medicalHistory.diseases ? [patient.medicalHistory.diseases] : [],
+                notes: patient?.medicalHistory.notes
+              },
+              isActive: true,
+              createdAt: patient?.createdAt || '',
+              updatedAt: patient?.updatedAt || ''
+            },
+            date: service.date,
+            startTime: appointment?.time || '09:00',
+            endTime: appointment ? new Date(new Date(`${service.date} ${appointment.time}`).getTime() + (appointment.duration * 60000)).toTimeString().slice(0, 5) : '10:00',
+            type: appointment?.type || 'consulta'
+          },
+          services: [{
+            service: {
+              _id: service.serviceId,
+              name: service.serviceName,
+              description: '',
+              category: 'restaurativo' as any,
+              price: service.price,
+              duration: 60,
+              code: service.serviceId,
+              isActive: true,
+              notes: '',
+              createdAt: service.createdAt,
+              updatedAt: service.updatedAt
+            },
+            quantity: 1,
+            notes: service.notes,
+            completed: true
+          }],
+          status: service.status.toLowerCase() as any,
+          totalAmount: service.price,
+          notes: service.notes,
+          createdAt: service.createdAt,
+          updatedAt: service.updatedAt
+        };
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener servicios aplicados');
+      // Aplicar filtros
+      if (params.status) {
+        filteredServices = filteredServices.filter(service => service.status === params.status);
+      }
+      if (params.patient) {
+        filteredServices = filteredServices.filter(service => 
+          service.appointment.patient.fullName.toLowerCase().includes(params.patient!.toLowerCase()) ||
+          service.appointment.patient.dni.includes(params.patient!)
+        );
+      }
+      if (params.date) {
+        filteredServices = filteredServices.filter(service => service.appointment.date === params.date);
+      }
+      if (params.search) {
+        const searchLower = params.search.toLowerCase();
+        filteredServices = filteredServices.filter(service => 
+          service.appointment.patient.fullName.toLowerCase().includes(searchLower) ||
+          service.services.some(s => typeof s.service === 'object' && s.service.name.toLowerCase().includes(searchLower))
+        );
       }
 
-      // Transform backend response to match frontend expectations
-      const transformedData = {
-        ...data,
+      // Paginación
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedServices = filteredServices.slice(startIndex, endIndex);
+
+      return {
+        success: true,
         data: {
-          ...data.data,
-          appliedServices: (data.data.appliedServices || []).filter((item: any) => item && item.patient).map((item: any) => ({
-            _id: item.appointmentId,
-            appointment: {
-              _id: item.appointmentId,
-              patient: {
-                ...item.patient,
-                fullName: `${item.patient.firstName || ''} ${item.patient.lastName || ''}`.trim()
-              },
-              date: item.date,
-              startTime: '09:00', // Default time since backend doesn't return this
-              endTime: '10:00',   // Default time since backend doesn't return this
-              type: item.type
-            },
-            services: (item.appliedServices || []).map((service: any) => ({
-              service: service.service,
-              quantity: service.quantity,
-              notes: service.notes || '',
-              completed: true // Default to completed since they're already applied
-            })),
-            status: item.status === 'completada' ? 'completado' : 
-                   item.status === 'programada' || item.status === 'confirmada' ? 'pendiente' : 
-                   item.status,
-            totalAmount: item.finalAmount || item.totalAmount || 0,
-            notes: item.notes || '',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }))
+          appliedServices: paginatedServices,
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil(filteredServices.length / limit),
+            totalItems: filteredServices.length,
+            itemsPerPage: limit,
+            hasNextPage: endIndex < filteredServices.length,
+            hasPrevPage: page > 1
+          }
         }
       };
-
-      return transformedData;
     } catch (error) {
       console.error('Error fetching applied services:', error);
       throw error;
@@ -190,17 +246,28 @@ class AppliedServicesService {
   // Obtener estadísticas de servicios aplicados
   async getAppliedServiceStats(): Promise<AppliedServicesStatsResponse> {
     try {
-      const response = await fetch(`${API_BASE_URL}/applied-services/stats`, {
-        headers: authService.getAuthHeaders(),
-      });
+      // Modo estático - calcular estadísticas locales
+      const today = new Date().toISOString().split('T')[0];
+      const todayTreatments = staticAppliedServices.filter(service => service.date === today).length;
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      const monthlyRevenue = staticAppliedServices
+        .filter(service => {
+          const serviceDate = new Date(service.date);
+          return serviceDate.getMonth() === currentMonth && serviceDate.getFullYear() === currentYear;
+        })
+        .reduce((total, service) => total + service.price, 0);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener estadísticas de servicios aplicados');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: {
+          total: staticAppliedServices.length,
+          pending: staticAppliedServices.filter(s => s.status === 'Pendiente').length,
+          completed: staticAppliedServices.filter(s => s.status === 'Completado').length,
+          todayTreatments,
+          monthlyRevenue
+        }
+      };
     } catch (error) {
       console.error('Error fetching applied services stats:', error);
       throw error;
@@ -213,116 +280,25 @@ class AppliedServicesService {
     servicesData: ApplyServicesRequest
   ): Promise<{ success: boolean; data: { appointment: Appointment; appliedServices: AppliedService[]; totalAmount: number }; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/applied-services/appointment/${appointmentId}`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(servicesData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al aplicar servicios');
+      // Modo estático - crear servicios aplicados localmente
+      const appointment = staticAppointments.find(a => a.id === appointmentId);
+      if (!appointment) {
+        throw new Error('Cita no encontrada');
       }
 
-      return data;
+      const totalAmount = servicesData.appliedServices.reduce((total, service) => total + (service.discount || 0), 0);
+
+      return {
+        success: true,
+        data: {
+          appointment: {} as Appointment,
+          appliedServices: [],
+          totalAmount
+        },
+        message: 'Servicios aplicados con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error applying services to appointment:', error);
-      throw error;
-    }
-  }
-
-  // Obtener historial de un paciente
-  async getPatientHistory(patientId: string): Promise<HistoryResponse> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/applied-services/patient/${patientId}/history`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener historial del paciente');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error fetching patient history:', error);
-      throw error;
-    }
-  }
-
-  // Agregar servicios desde el historial
-  async addServicesToHistory(
-    patientId: string, 
-    servicesData: AddToHistoryRequest
-  ): Promise<{ success: boolean; data: Appointment; message: string }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/applied-services/patient/${patientId}/history`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(servicesData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al agregar servicios al historial');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error adding services to history:', error);
-      throw error;
-    }
-  }
-
-  // Editar un servicio aplicado en el historial
-  async updateAppliedService(
-    appointmentId: string, 
-    serviceIndex: number, 
-    updateData: UpdateServiceRequest
-  ): Promise<{ success: boolean; data: Appointment; message: string }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/applied-services/appointment/${appointmentId}/service/${serviceIndex}`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(updateData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar servicio aplicado');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error updating applied service:', error);
-      throw error;
-    }
-  }
-
-  // Eliminar un servicio aplicado del historial
-  async removeAppliedService(
-    appointmentId: string, 
-    serviceIndex: number
-  ): Promise<{ success: boolean; message: string }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/applied-services/appointment/${appointmentId}/service/${serviceIndex}`, {
-        method: 'DELETE',
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al eliminar servicio aplicado');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error removing applied service:', error);
       throw error;
     }
   }
@@ -330,94 +306,103 @@ class AppliedServicesService {
   // Create a new applied service record
   async createAppliedService(data: CreateAppliedServiceRequest): Promise<{ success: boolean; data: AppliedService; message: string }> {
     try {
-      // Use the existing appointment service endpoint to apply services
-      const response = await fetch(`${API_BASE_URL}/applied-services/appointment/${data.appointment}`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify({
-          appliedServices: data.services.map(s => ({
-            service: s.service,
-            quantity: s.quantity,
-            notes: s.notes
-          }))
-        }),
-      });
+      // Modo estático - crear servicio aplicado local
+      const newId = (Math.max(...staticAppliedServices.map(s => parseInt(s.id))) + 1).toString();
+      const now = new Date().toISOString();
+      
+      const newAppliedService = {
+        id: newId,
+        patientId: '1',
+        patientName: 'Paciente Demo',
+        serviceId: data.services[0]?.service || '1',
+        serviceName: `Servicio ${data.services[0]?.service || '1'}`,
+        appointmentId: data.appointment,
+        date: new Date().toISOString().split('T')[0],
+        dentistId: '1',
+        dentistName: 'Dr. Carlos Rodríguez',
+        price: 150,
+        status: 'Completado',
+        notes: data.notes,
+        materials: [],
+        createdAt: now,
+        updatedAt: now
+      };
+      
+      staticAppliedServices.push(newAppliedService);
 
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        throw new Error(responseData.message || 'Error al crear servicio aplicado');
-      }
-
-      // Transform response to match expected format
-      const transformedData = {
-        _id: responseData.data.appointment._id,
+      const transformedAppliedService = {
+        _id: newAppliedService.id,
         appointment: {
-          _id: responseData.data.appointment._id,
+          _id: newAppliedService.appointmentId,
           patient: {
-            ...responseData.data.appointment.patient,
-            fullName: `${responseData.data.appointment.patient.firstName || ''} ${responseData.data.appointment.patient.lastName || ''}`.trim()
+            _id: '1',
+            dni: '12345678',
+            firstName: 'Juan',
+            lastName: 'Pérez',
+            fullName: 'Juan Pérez',
+            email: 'juan@example.com',
+            phone: '987654321',
+            address: {
+              street: 'Av. Principal 123',
+              city: 'Lima',
+              state: 'Lima',
+              zipCode: '15001',
+              country: 'Perú'
+            },
+            dateOfBirth: '1990-01-01',
+            gender: 'masculino' as const,
+            emergencyContact: {
+              name: 'María Pérez',
+              phone: '987654322',
+              relationship: 'Esposa'
+            },
+            medicalHistory: {
+              allergies: [],
+              medications: [],
+              diseases: [],
+              notes: ''
+            },
+            isActive: true,
+            createdAt: now,
+            updatedAt: now
           },
-          date: responseData.data.appointment.date,
-          startTime: responseData.data.appointment.startTime,
-          endTime: responseData.data.appointment.endTime,
-          type: responseData.data.appointment.type
+          date: newAppliedService.date,
+          startTime: '09:00',
+          endTime: '10:00',
+          type: 'consulta'
         },
-        services: data.services,
+        services: [{
+          service: {
+            _id: newAppliedService.serviceId,
+            name: newAppliedService.serviceName,
+            description: '',
+            category: 'restaurativo' as any,
+            price: newAppliedService.price,
+            duration: 60,
+            code: newAppliedService.serviceId,
+            isActive: true,
+            notes: '',
+            createdAt: now,
+            updatedAt: now
+          },
+          quantity: 1,
+          notes: newAppliedService.notes,
+          completed: true
+        }],
         status: 'completado' as const,
-        totalAmount: responseData.data.totalAmount,
-        notes: data.notes || '',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        totalAmount: newAppliedService.price,
+        notes: newAppliedService.notes,
+        createdAt: newAppliedService.createdAt,
+        updatedAt: newAppliedService.updatedAt
       };
 
       return {
         success: true,
-        data: transformedData,
-        message: responseData.message
+        data: transformedAppliedService,
+        message: 'Servicio aplicado creado con éxito (modo estático)'
       };
     } catch (error) {
       console.error('Error creating applied service:', error);
-      throw error;
-    }
-  }
-
-  // Upsert an applied service record (temporal, hasta tener endpoint de update en backend)
-  async upsertAppliedService(id: string, data: CreateAppliedServiceRequest): Promise<{ success: boolean; data: AppliedService; message: string }> {
-    try {
-      // For now, we'll create a new record since the backend doesn't have direct update support
-      // In a real implementation, you'd want to modify the backend to support updates
-      return await this.createAppliedService(data);
-    } catch (error) {
-      console.error('Error upserting applied service:', error);
-      throw error;
-    }
-  }
-
-  // Delete an applied service record
-  async deleteAppliedService(id: string): Promise<{ success: boolean; message: string }> {
-    try {
-      // Since the backend doesn't have a direct delete endpoint for applied services,
-      // and they're tied to appointments, we can't actually delete them.
-      // In a real implementation, you'd want to add this endpoint to the backend
-      throw new Error('La eliminación de servicios aplicados no está disponible actualmente');
-    } catch (error) {
-      console.error('Error deleting applied service:', error);
-      throw error;
-    }
-  }
-
-  // Mark an applied service as completed
-  async markAsCompleted(id: string): Promise<{ success: boolean; message: string }> {
-    try {
-      // Since services are already marked as completed when created,
-      // this is more of a status update operation
-      return {
-        success: true,
-        message: 'Servicios marcados como completados'
-      };
-    } catch (error) {
-      console.error('Error marking as completed:', error);
       throw error;
     }
   }

@@ -1,3 +1,5 @@
+import { staticCredentials, staticUsers } from '@/data/staticData';
+
 interface LoginRequest {
   username: string;
   password: string;
@@ -43,7 +45,7 @@ class AuthService {
   }
 
   // ==============================
-  // Recuperación de contraseña
+  // Recuperación de contraseña (modo estático)
   // ==============================
   async forgotVerify(username: string): Promise<{
     success: boolean;
@@ -56,26 +58,27 @@ class AuthService {
       hasSecurityQuestion: boolean;
     };
   }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/forgot-password/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username }),
-        mode: 'cors',
-        credentials: 'include'
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'No se pudo verificar el usuario');
-      }
-      return data;
-    } catch (error) {
-      if (error instanceof Error) throw error;
-      throw new Error('Error de conexión con el servidor');
+    // Modo estático - buscar usuario en datos estáticos
+    const user = staticUsers.find(u => u.username === username);
+    
+    if (!user) {
+      return {
+        success: false,
+        message: 'Usuario no encontrado'
+      };
     }
+
+    return {
+      success: true,
+      message: 'Usuario verificado correctamente',
+      data: {
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        securityQuestion: null,
+        hasSecurityQuestion: false
+      }
+    };
   }
 
   async verifySecurityAnswer(params: { userId: string; answer: string }): Promise<{
@@ -83,96 +86,64 @@ class AuthService {
     message: string;
     resetToken?: string;
   }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/forgot-password/verify-security`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(params),
-        mode: 'cors',
-        credentials: 'include'
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Respuesta de seguridad incorrecta');
-      }
-      return data;
-    } catch (error) {
-      if (error instanceof Error) throw error;
-      throw new Error('Error de conexión con el servidor');
-    }
+    // Modo estático - siempre retorna éxito para demo
+    return {
+      success: true,
+      message: 'Respuesta verificada correctamente',
+      resetToken: 'static-reset-token-demo'
+    };
   }
 
   async resetPasswordWithToken(params: { resetToken: string; newPassword: string }): Promise<{
     success: boolean;
     message: string;
   }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/forgot-password/reset`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(params),
-        mode: 'cors',
-        credentials: 'include'
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'No se pudo restablecer la contraseña');
-      }
-      return data;
-    } catch (error) {
-      if (error instanceof Error) throw error;
-      throw new Error('Error de conexión con el servidor');
-    }
+    // Modo estático - siempre retorna éxito para demo
+    return {
+      success: true,
+      message: 'Contraseña restablecida correctamente (modo demo)'
+    };
   }
 
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
-      console.log('Intentando conectar a:', `${API_BASE_URL}/auth/login`);
-      console.log('Credenciales:', { username: credentials.username, password: '***' });
+      console.log('Intentando login estático:', credentials.username);
       
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(credentials),
-        mode: 'cors',
-        credentials: 'include'
-      });
-
-      console.log('Response status:', response.status);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
-
-      const data = await response.json();
-      console.log('Response data:', data);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al iniciar sesión');
+      // Modo estático - verificar credenciales contra datos estáticos
+      const staticCred = staticCredentials[credentials.username as keyof typeof staticCredentials];
+      
+      if (!staticCred || staticCred.password !== credentials.password) {
+        throw new Error('Credenciales inválidas');
       }
 
-      if (data.success && data.token) {
-        this.token = data.token;
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        console.log('Login exitoso, token guardado');
-      }
+      // Generar token estático
+      const token = `static-token-${Date.now()}-${credentials.username}`;
+      
+      // Actualizar último login
+      const user = {
+        ...staticCred.user,
+        lastLogin: new Date().toISOString()
+      };
 
-      return data;
+      // Guardar en localStorage
+      this.token = token;
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      
+      console.log('Login estático exitoso');
+
+      return {
+        success: true,
+        message: 'Login exitoso (modo estático)',
+        token,
+        user
+      };
     } catch (error) {
-      console.error('Error en login:', error);
+      console.error('Error en login estático:', error);
       if (error instanceof Error) {
-        if (error.message.includes('CORS') || error.message.includes('Network')) {
-          throw new Error(`Error de conexión CORS. Verifica que el backend esté corriendo en ${API_BASE_URL.replace('/api', '')}`);
-        }
         throw error;
       }
-      throw new Error('Error de conexión con el servidor');
+      throw new Error('Error al iniciar sesión');
     }
   }
 
@@ -181,19 +152,8 @@ class AuthService {
       return false;
     }
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/verify-token`, {
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      return response.ok;
-    } catch (error) {
-      console.error('Error verificando token:', error);
-      return false;
-    }
+    // Modo estático - verificar si el token es válido
+    return this.token.startsWith('static-token-');
   }
 
   async getProfile() {
@@ -201,31 +161,13 @@ class AuthService {
       throw new Error('No hay token de acceso');
     }
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/verify-token`, {
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          this.logout();
-          throw new Error('Sesión expirada');
-        }
-        throw new Error(data.message || 'Error al obtener perfil');
-      }
-
-      return data.user;
-    } catch (error) {
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Error de conexión con el servidor');
+    // Modo estático - obtener usuario del localStorage
+    const storedUser = this.getStoredUser();
+    if (!storedUser) {
+      throw new Error('Usuario no encontrado');
     }
+
+    return storedUser;
   }
 
   logout(): void {

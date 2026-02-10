@@ -1,4 +1,5 @@
 import { authService } from './authService';
+import { staticPayments, staticDashboardStats } from '@/data/staticData';
 
 const API_BASE_URL = ((import.meta as any)?.env?.VITE_API_BASE_URL as string) || 'http://localhost:5000/api';
 
@@ -80,33 +81,20 @@ export interface Receipt {
 }
 
 export interface PaymentStats {
-  totalRevenue: number;
-  todayRevenue: number;
-  monthRevenue: number;
-  pendingAmount: number;
-  totalPayments: number;
-  byMethod: Array<{ _id: string; total: number; count: number }>;
-  today?: {
-    revenue: number;
-    transactions: number;
+  success: boolean;
+  data: {
+    month: {
+      revenue: number;
+      transactions: number;
+    };
+    pending: {
+      amount: number;
+      count: number;
+    };
+    totalRevenue: number;
+    todayRevenue: number;
+    byMethod: Array<{ _id: string; total: number; count: number }>;
   };
-  month?: {
-    revenue: number;
-    transactions: number;
-  };
-  year?: {
-    revenue: number;
-    transactions: number;
-  };
-  pending?: {
-    amount: number;
-    count: number;
-  };
-  paymentMethods?: {
-    _id: string;
-    count: number;
-    total: number;
-  }[];
 }
 
 export interface Payment {
@@ -198,137 +186,154 @@ class PaymentService {
     };
   }> {
     try {
-      const queryParams = new URLSearchParams();
-      
-      // Agregar parámetros a la URL
-      if (params.page) queryParams.append('page', params.page.toString());
-      if (params.limit) queryParams.append('limit', params.limit.toString());
-      if (params.search) queryParams.append('search', params.search);
-      if (params.status && params.status !== 'all') queryParams.append('status', params.status);
-      if (params.paymentMethod && params.paymentMethod !== 'all') queryParams.append('paymentMethod', params.paymentMethod);
-      if (params.date) queryParams.append('date', params.date);
+      // Modo estático - usar datos locales
+      let filteredPayments = staticPayments.map(payment => ({
+        _id: payment.id,
+        appointmentId: payment.appointmentId,
+        patient: {
+          _id: payment.patientId,
+          name: payment.patientName,
+          fullName: payment.patientName,
+          dni: payment.patientId,
+          phone: '',
+          email: '',
+          address: {
+            street: '',
+            city: '',
+            state: '',
+            zipCode: '',
+            country: ''
+          },
+          dateOfBirth: '',
+          gender: 'masculino' as const,
+          emergencyContact: {
+            name: '',
+            phone: '',
+            relationship: ''
+          },
+          medicalHistory: {
+            allergies: [],
+            medications: [],
+            diseases: [],
+            notes: ''
+          },
+          isActive: true,
+          createdAt: payment.createdAt,
+          updatedAt: payment.updatedAt
+        },
+        services: payment.services.map(service => ({
+          service: {
+            _id: service.serviceId,
+            name: service.serviceName
+          },
+          serviceName: service.serviceName,
+          category: service.category,
+          quantity: service.quantity,
+          unitPrice: service.unitPrice,
+          total: service.total
+        })),
+        subtotal: payment.amount,
+        discount: 0,
+        discountType: 'percentage' as const,
+        discountAmount: 0,
+        finalAmount: payment.amount,
+        total: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        paymentMethods: [{
+          method: payment.paymentMethod as any,
+          amount: payment.amount,
+          reference: payment.transactionId
+        }],
+        isPaid: payment.status === 'Completado',
+        paidAt: payment.date,
+        receipt: '',
+        receiptNumber: payment.transactionId,
+        notes: payment.notes,
+        date: payment.date,
+        createdAt: payment.createdAt,
+        status: payment.status.toLowerCase() as any,
+        appointment: {
+          _id: payment.appointmentId
+        }
+      }));
 
-      const response = await fetch(`${API_BASE_URL}/payments?${queryParams.toString()}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener pagos');
+      // Aplicar filtros
+      if (params.status) {
+        filteredPayments = filteredPayments.filter(payment => payment.status === params.status);
+      }
+      if (params.paymentMethod) {
+        filteredPayments = filteredPayments.filter(payment => payment.paymentMethod === params.paymentMethod);
+      }
+      if (params.date) {
+        filteredPayments = filteredPayments.filter(payment => payment.date === params.date);
+      }
+      if (params.search) {
+        const searchLower = params.search.toLowerCase();
+        filteredPayments = filteredPayments.filter(payment => 
+          payment.patient.fullName.toLowerCase().includes(searchLower) ||
+          payment.patient.dni.toLowerCase().includes(searchLower) ||
+          payment.notes?.toLowerCase().includes(searchLower)
+        );
       }
 
-      return data;
+      // Paginación
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedPayments = filteredPayments.slice(startIndex, endIndex);
+
+      return {
+        success: true,
+        data: {
+          payments: paginatedPayments,
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil(filteredPayments.length / limit),
+            totalItems: filteredPayments.length,
+            itemsPerPage: limit
+          }
+        }
+      };
     } catch (error) {
       console.error('Error fetching payments:', error);
       throw error;
     }
   }
 
-  // Obtener resumen de pago para una cita
-  async getPaymentSummary(appointmentId: string): Promise<{ success: boolean; data: PaymentSummary }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/payments/appointment/${appointmentId}/summary`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener resumen de pago');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error fetching payment summary:', error);
-      throw error;
-    }
-  }
-
-  // Aplicar descuento general a una cita
-  async applyDiscount(
-    appointmentId: string, 
-    discountData: ApplyDiscountRequest
-  ): Promise<{ success: boolean; data: { originalAmount: number; discount: number; discountAmount: number; finalAmount: number }; message: string }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/payments/appointment/${appointmentId}/discount`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(discountData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al aplicar descuento');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error applying discount:', error);
-      throw error;
-    }
-  }
-
-  // Procesar pago de una cita
-  async processPayment(
-    appointmentId: string, 
-    paymentData: ProcessPaymentRequest
-  ): Promise<{ success: boolean; data: { appointment: any; receipt: Receipt }; message: string }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/payments/appointment/${appointmentId}/pay`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(paymentData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al procesar pago');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error processing payment:', error);
-      throw error;
-    }
-  }
-
-  // Obtener comprobante de pago
-  async getReceipt(appointmentId: string): Promise<{ success: boolean; data: Receipt }> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/payments/receipt/${appointmentId}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener comprobante');
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error fetching receipt:', error);
-      throw error;
-    }
-  }
-
   // Obtener estadísticas de pagos
-  async getPaymentStats(): Promise<{ success: boolean; data: PaymentStats }> {
+  async getPaymentStats(): Promise<PaymentStats> {
     try {
-      const response = await fetch(`${API_BASE_URL}/payments/stats`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener estadísticas de pagos');
-      }
-
-      return data;
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Usar datos estáticos del dashboard
+      return {
+        success: true,
+        data: {
+          month: {
+            revenue: staticDashboardStats.payments.month.revenue,
+            transactions: staticDashboardStats.payments.month.transactions
+          },
+          pending: {
+            amount: staticDashboardStats.payments.pending.amount,
+            count: staticDashboardStats.payments.pending.count
+          },
+          totalRevenue: staticPayments.reduce((total, payment) => total + payment.amount, 0),
+          todayRevenue: staticDashboardStats.payments.today.revenue,
+          byMethod: staticPayments.reduce((acc, payment) => {
+            const method = payment.paymentMethod;
+            const existing = acc.find(item => item._id === method);
+            if (existing) {
+              existing.total += payment.amount;
+              existing.count += 1;
+            } else {
+              acc.push({ _id: method, total: payment.amount, count: 1 });
+            }
+            return acc;
+          }, [])
+        }
+      };
     } catch (error) {
       console.error('Error fetching payment stats:', error);
       throw error;
@@ -336,21 +341,84 @@ class PaymentService {
   }
 
   // Crear un nuevo pago
-  async createPayment(paymentData: CreatePaymentRequest): Promise<{ success: boolean; data: Payment }> {
+  async createPayment(paymentData: CreatePaymentRequest): Promise<{
+    success: boolean;
+    data: Payment;
+    message?: string;
+  }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/payments`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(paymentData),
+      // Modo estático - crear pago local
+      const newPayment: Payment = {
+        _id: `payment_${Date.now()}`,
+        appointmentId: paymentData.appointment || '',
+        patient: {
+          _id: paymentData.patient,
+          name: '', // Se llenaría con datos del paciente
+          fullName: '', // Se llenaría con datos del paciente
+          dni: '',
+          phone: ''
+        },
+        services: paymentData.services.map(s => ({
+          service: {
+            _id: s.service,
+            name: '' // Se llenaría con datos del servicio
+          },
+          serviceName: '', // Se llenaría con datos del servicio
+          category: '',
+          quantity: s.quantity,
+          unitPrice: s.unitPrice,
+          total: s.total
+        })),
+        subtotal: paymentData.subtotal,
+        discount: paymentData.discount,
+        discountType: paymentData.discountType,
+        discountAmount: paymentData.discountType === 'percentage' 
+          ? (paymentData.subtotal * paymentData.discount) / 100 
+          : paymentData.discount,
+        finalAmount: paymentData.total,
+        total: paymentData.total,
+        paymentMethod: paymentData.paymentMethods[0]?.method || 'efectivo',
+        paymentMethods: paymentData.paymentMethods,
+        isPaid: true,
+        paidAt: new Date().toISOString(),
+        receipt: `REC${Date.now()}`,
+        receiptNumber: `REC${Date.now()}`,
+        notes: paymentData.notes,
+        date: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString(),
+        status: 'paid',
+        appointment: paymentData.appointment ? { _id: paymentData.appointment } : undefined
+      };
+
+      // Agregar a los datos estáticos (simulación)
+      staticPayments.push({
+        id: newPayment._id,
+        appointmentId: newPayment.appointmentId,
+        patientId: paymentData.patient,
+        patientName: newPayment.patient.fullName,
+        services: paymentData.services.map(s => ({
+          serviceId: s.service,
+          serviceName: '', // Se llenaría con datos del servicio
+          category: '',
+          quantity: s.quantity,
+          unitPrice: s.unitPrice,
+          total: s.total
+        })),
+        amount: paymentData.total,
+        date: newPayment.date,
+        paymentMethod: newPayment.paymentMethod,
+        status: 'Completado',
+        transactionId: newPayment.receiptNumber,
+        notes: paymentData.notes,
+        createdAt: newPayment.createdAt,
+        updatedAt: newPayment.createdAt
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al crear pago');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: newPayment,
+        message: 'Pago creado exitosamente'
+      };
     } catch (error) {
       console.error('Error creating payment:', error);
       throw error;
@@ -358,21 +426,82 @@ class PaymentService {
   }
 
   // Actualizar un pago existente
-  async updatePayment(paymentId: string, paymentData: CreatePaymentRequest): Promise<{ success: boolean; data: Payment }> {
+  async updatePayment(id: string, paymentData: CreatePaymentRequest): Promise<{
+    success: boolean;
+    data: Payment;
+    message?: string;
+  }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/payments/${paymentId}`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(paymentData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar pago');
+      // Modo estático - actualizar pago local
+      const paymentIndex = staticPayments.findIndex(p => p.id === id);
+      if (paymentIndex === -1) {
+        throw new Error('Pago no encontrado');
       }
 
-      return data;
+      const updatedPayment: Payment = {
+        _id: id,
+        appointmentId: paymentData.appointment || '',
+        patient: {
+          _id: paymentData.patient,
+          name: '', // Se llenaría con datos del paciente
+          fullName: '', // Se llenaría con datos del paciente
+          dni: '',
+          phone: ''
+        },
+        services: paymentData.services.map(s => ({
+          service: {
+            _id: s.service,
+            name: ''
+          },
+          serviceName: '',
+          category: '',
+          quantity: s.quantity,
+          unitPrice: s.unitPrice,
+          total: s.total
+        })),
+        subtotal: paymentData.subtotal,
+        discount: paymentData.discount,
+        discountType: paymentData.discountType,
+        discountAmount: paymentData.discountType === 'percentage' 
+          ? (paymentData.subtotal * paymentData.discount) / 100 
+          : paymentData.discount,
+        finalAmount: paymentData.total,
+        total: paymentData.total,
+        paymentMethod: paymentData.paymentMethods[0]?.method || 'efectivo',
+        paymentMethods: paymentData.paymentMethods,
+        isPaid: true,
+        paidAt: new Date().toISOString(),
+        receipt: `REC${Date.now()}`,
+        receiptNumber: `REC${Date.now()}`,
+        notes: paymentData.notes,
+        date: staticPayments[paymentIndex].date,
+        createdAt: staticPayments[paymentIndex].createdAt,
+        status: 'paid',
+        appointment: paymentData.appointment ? { _id: paymentData.appointment } : undefined
+      };
+
+      // Actualizar en datos estáticos
+      staticPayments[paymentIndex] = {
+        ...staticPayments[paymentIndex],
+        services: paymentData.services.map(s => ({
+          serviceId: s.service,
+          serviceName: '',
+          category: '',
+          quantity: s.quantity,
+          unitPrice: s.unitPrice,
+          total: s.total
+        })),
+        amount: paymentData.total,
+        paymentMethod: updatedPayment.paymentMethod,
+        notes: paymentData.notes,
+        updatedAt: new Date().toISOString()
+      };
+
+      return {
+        success: true,
+        data: updatedPayment,
+        message: 'Pago actualizado exitosamente'
+      };
     } catch (error) {
       console.error('Error updating payment:', error);
       throw error;
@@ -380,20 +509,23 @@ class PaymentService {
   }
 
   // Eliminar un pago
-  async deletePayment(paymentId: string): Promise<{ success: boolean }> {
+  async deletePayment(id: string): Promise<{
+    success: boolean;
+    message?: string;
+  }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/payments/${paymentId}`, {
-        method: 'DELETE',
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al eliminar pago');
+      // Modo estático - eliminar pago local
+      const paymentIndex = staticPayments.findIndex(p => p.id === id);
+      if (paymentIndex === -1) {
+        throw new Error('Pago no encontrado');
       }
 
-      return data;
+      staticPayments.splice(paymentIndex, 1);
+
+      return {
+        success: true,
+        message: 'Pago eliminado exitosamente'
+      };
     } catch (error) {
       console.error('Error deleting payment:', error);
       throw error;
@@ -419,14 +551,6 @@ class PaymentService {
     return methodNames[method] || method;
   }
 
-  calculateChange(amountPaid: number, finalAmount: number): number {
-    return Math.max(0, amountPaid - finalAmount);
-  }
-
-  calculateDiscountAmount(subtotal: number, discountPercentage: number): number {
-    return (subtotal * discountPercentage) / 100;
-  }
-
   formatDate(dateString: string): string {
     const date = new Date(dateString);
     return new Intl.DateTimeFormat('es-PE', {
@@ -447,105 +571,6 @@ class PaymentService {
       minute: '2-digit',
       timeZone: 'America/Lima'
     }).format(date);
-  }
-
-  // Generar PDF del comprobante (función placeholder)
-  async generateReceiptPDF(receipt: Receipt): Promise<Blob> {
-    // Esta función se puede implementar con librerías como jsPDF o pdfmake
-    // Por ahora retornamos un placeholder
-    throw new Error('Generación de PDF no implementada aún');
-  }
-
-  // Imprimir comprobante
-  printReceipt(receipt: Receipt): void {
-    const printWindow = window.open('', '', 'height=600,width=800');
-    if (!printWindow) return;
-
-    const html = this.generateReceiptHTML(receipt);
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
-  }
-
-  private generateReceiptHTML(receipt: Receipt): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Comprobante de Pago - ${receipt.receiptNumber}</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .header { text-align: center; margin-bottom: 20px; }
-          .clinic-info { text-align: center; margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
-          .patient-info { margin-bottom: 15px; }
-          .services-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-          .services-table th, .services-table td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-          .services-table th { background-color: #f0f0f0; }
-          .totals { text-align: right; margin-top: 20px; }
-          .footer { margin-top: 30px; text-align: center; font-size: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="clinic-info">
-          <h2>${receipt.clinicInfo.name}</h2>
-          <p>${receipt.clinicInfo.address}</p>
-          <p>Tel: ${receipt.clinicInfo.phone}</p>
-        </div>
-        
-        <div class="header">
-          <h3>COMPROBANTE DE PAGO</h3>
-          <p><strong>N°:</strong> ${receipt.receiptNumber}</p>
-          <p><strong>Fecha:</strong> ${this.formatDateTime(receipt.date)}</p>
-        </div>
-        
-        <div class="patient-info">
-          <p><strong>Paciente:</strong> ${receipt.patient.name}</p>
-          <p><strong>DNI:</strong> ${receipt.patient.dni}</p>
-          ${receipt.patient.phone ? `<p><strong>Teléfono:</strong> ${receipt.patient.phone}</p>` : ''}
-          <p><strong>Fecha de Cita:</strong> ${this.formatDate(receipt.appointmentDate)}</p>
-        </div>
-        
-        <table class="services-table">
-          <thead>
-            <tr>
-              <th>Servicio</th>
-              <th>Cant.</th>
-              <th>Precio Unit.</th>
-              <th>Subtotal</th>
-              <th>Desc.</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${receipt.services.map(service => `
-              <tr>
-                <td>${service.serviceName}</td>
-                <td>${service.quantity}</td>
-                <td>${this.formatCurrency(service.unitPrice)}</td>
-                <td>${this.formatCurrency(service.subtotal)}</td>
-                <td>${service.discount}%</td>
-                <td>${this.formatCurrency(service.total)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        
-        <div class="totals">
-          <p><strong>Subtotal: ${this.formatCurrency(receipt.totals.subtotal)}</strong></p>
-          ${receipt.totals.generalDiscount > 0 ? `<p>Descuento General: ${receipt.totals.generalDiscount}%</p>` : ''}
-          <p><strong>TOTAL: ${this.formatCurrency(receipt.totals.finalAmount)}</strong></p>
-          <p>Método de Pago: ${this.getPaymentMethodDisplayName(receipt.totals.paymentMethod)}</p>
-        </div>
-        
-        <div class="footer">
-          <p>Gracias por su confianza</p>
-          <p>DocSmile Suite - Sistema de Gestión Dental</p>
-        </div>
-      </body>
-      </html>
-    `;
   }
 }
 

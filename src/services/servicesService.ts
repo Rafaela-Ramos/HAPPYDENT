@@ -1,4 +1,5 @@
 import { authService } from './authService';
+import { staticServices } from '@/data/staticData';
 
 const API_BASE_URL = ((import.meta as any)?.env?.VITE_API_BASE_URL as string) || 'http://localhost:5000/api';
 
@@ -69,24 +70,57 @@ export interface ServiceStatsResponse {
 class DentalServicesService {
   async getServices(params: GetServicesParams = {}): Promise<GetServicesResponse> {
     try {
-      const queryParams = new URLSearchParams();
-      if (params.page) queryParams.append('page', params.page.toString());
-      if (params.limit) queryParams.append('limit', params.limit.toString());
-      if (params.search) queryParams.append('search', params.search);
-      if (params.category) queryParams.append('category', params.category);
-      if (params.isActive !== undefined) queryParams.append('isActive', params.isActive.toString());
+      // Modo estático - usar datos locales
+      let filteredServices = staticServices.map(service => ({
+        _id: service.id,
+        name: service.name,
+        description: service.description,
+        category: service.category.toLowerCase() as any,
+        price: service.price,
+        duration: service.duration,
+        code: service.id,
+        isActive: service.isActive,
+        notes: '',
+        createdAt: service.createdAt,
+        updatedAt: service.updatedAt
+      }));
 
-      const response = await fetch(`${API_BASE_URL}/services?${queryParams}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener servicios');
+      // Aplicar filtros
+      if (params.search) {
+        const searchLower = params.search.toLowerCase();
+        filteredServices = filteredServices.filter(service => 
+          service.name.toLowerCase().includes(searchLower) ||
+          service.description?.toLowerCase().includes(searchLower)
+        );
       }
 
-      return data;
+      if (params.category) {
+        filteredServices = filteredServices.filter(service => service.category === params.category);
+      }
+
+      if (params.isActive !== undefined) {
+        filteredServices = filteredServices.filter(service => service.isActive === params.isActive);
+      }
+
+      // Paginación
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedServices = filteredServices.slice(startIndex, endIndex);
+
+      return {
+        success: true,
+        data: {
+          services: paginatedServices,
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil(filteredServices.length / limit),
+            totalItems: filteredServices.length,
+            itemsPerPage: limit
+          }
+        }
+      };
     } catch (error) {
       console.error('Error fetching services:', error);
       throw error;
@@ -95,17 +129,30 @@ class DentalServicesService {
 
   async getServiceById(id: string): Promise<{ success: boolean; data: DentalService }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/${id}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener servicio');
+      // Modo estático - buscar servicio local
+      const service = staticServices.find(s => s.id === id);
+      if (!service) {
+        throw new Error('Servicio no encontrado');
       }
 
-      return data;
+      const transformedService = {
+        _id: service.id,
+        name: service.name,
+        description: service.description,
+        category: service.category.toLowerCase() as any,
+        price: service.price,
+        duration: service.duration,
+        code: service.id,
+        isActive: service.isActive,
+        notes: '',
+        createdAt: service.createdAt,
+        updatedAt: service.updatedAt
+      };
+
+      return {
+        success: true,
+        data: transformedService
+      };
     } catch (error) {
       console.error('Error fetching service:', error);
       throw error;
@@ -114,17 +161,23 @@ class DentalServicesService {
 
   async getCategories(): Promise<{ success: boolean; data: ServiceCategory[] }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/categories`, {
-        headers: authService.getAuthHeaders(),
+      // Modo estático - calcular categorías locales
+      const categoryCount: Record<string, number> = {};
+      
+      staticServices.forEach(service => {
+        const category = service.category.toLowerCase();
+        categoryCount[category] = (categoryCount[category] || 0) + 1;
       });
 
-      const data = await response.json();
+      const categories: ServiceCategory[] = Object.entries(categoryCount).map(([name, count]) => ({
+        name,
+        count
+      }));
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener categorías');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: categories
+      };
     } catch (error) {
       console.error('Error fetching categories:', error);
       throw error;
@@ -133,17 +186,27 @@ class DentalServicesService {
 
   async getServicesByCategory(category: string): Promise<{ success: boolean; data: DentalService[] }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/by-category/${category}`, {
-        headers: authService.getAuthHeaders(),
-      });
+      // Modo estático - filtrar por categoría
+      const filteredServices = staticServices
+        .filter(service => service.category.toLowerCase() === category.toLowerCase())
+        .map(service => ({
+          _id: service.id,
+          name: service.name,
+          description: service.description,
+          category: service.category.toLowerCase() as any,
+          price: service.price,
+          duration: service.duration,
+          code: service.id,
+          isActive: service.isActive,
+          notes: '',
+          createdAt: service.createdAt,
+          updatedAt: service.updatedAt
+        }));
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener servicios por categoría');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: filteredServices
+      };
     } catch (error) {
       console.error('Error fetching services by category:', error);
       throw error;
@@ -152,19 +215,43 @@ class DentalServicesService {
 
   async createService(serviceData: CreateServiceRequest): Promise<{ success: boolean; data: DentalService; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(serviceData),
-      });
+      // Modo estático - crear servicio local
+      const newId = (Math.max(...staticServices.map(s => parseInt(s.id))) + 1).toString();
+      const now = new Date().toISOString();
+      
+      const newService = {
+        id: newId,
+        name: serviceData.name,
+        description: serviceData.description || '',
+        category: serviceData.category,
+        price: serviceData.price,
+        duration: serviceData.duration,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      };
+      
+      staticServices.push(newService);
 
-      const data = await response.json();
+      const transformedService = {
+        _id: newService.id,
+        name: newService.name,
+        description: newService.description,
+        category: newService.category.toLowerCase() as any,
+        price: newService.price,
+        duration: newService.duration,
+        code: newService.id,
+        isActive: newService.isActive,
+        notes: serviceData.notes || '',
+        createdAt: newService.createdAt,
+        updatedAt: newService.updatedAt
+      };
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al crear servicio');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: transformedService,
+        message: 'Servicio creado con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error creating service:', error);
       throw error;
@@ -173,19 +260,40 @@ class DentalServicesService {
 
   async updateService(id: string, serviceData: Partial<CreateServiceRequest>): Promise<{ success: boolean; data: DentalService; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/${id}`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(serviceData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar servicio');
+      // Modo estático - actualizar servicio local
+      const serviceIndex = staticServices.findIndex(s => s.id === id);
+      
+      if (serviceIndex === -1) {
+        throw new Error('Servicio no encontrado');
       }
 
-      return data;
+      const updatedService = {
+        ...staticServices[serviceIndex],
+        ...serviceData,
+        updatedAt: new Date().toISOString()
+      };
+
+      staticServices[serviceIndex] = updatedService;
+
+      const transformedService = {
+        _id: updatedService.id,
+        name: updatedService.name,
+        description: updatedService.description,
+        category: updatedService.category.toLowerCase() as any,
+        price: updatedService.price,
+        duration: updatedService.duration,
+        code: updatedService.id,
+        isActive: updatedService.isActive,
+        notes: serviceData.notes || '',
+        createdAt: updatedService.createdAt,
+        updatedAt: updatedService.updatedAt
+      };
+
+      return {
+        success: true,
+        data: transformedService,
+        message: 'Servicio actualizado con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error updating service:', error);
       throw error;
@@ -194,18 +302,19 @@ class DentalServicesService {
 
   async deleteService(id: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/${id}`, {
-        method: 'DELETE',
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al eliminar servicio');
+      // Modo estático - eliminar servicio local
+      const serviceIndex = staticServices.findIndex(s => s.id === id);
+      
+      if (serviceIndex === -1) {
+        throw new Error('Servicio no encontrado');
       }
 
-      return data;
+      staticServices.splice(serviceIndex, 1);
+
+      return {
+        success: true,
+        message: 'Servicio eliminado con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error deleting service:', error);
       throw error;
@@ -214,18 +323,40 @@ class DentalServicesService {
 
   async restoreService(id: string): Promise<{ success: boolean; data: DentalService; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/${id}/restore`, {
-        method: 'PATCH',
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al restaurar servicio');
+      // Modo estático - restaurar servicio (marcar como activo)
+      const serviceIndex = staticServices.findIndex(s => s.id === id);
+      
+      if (serviceIndex === -1) {
+        throw new Error('Servicio no encontrado');
       }
 
-      return data;
+      const restoredService = {
+        ...staticServices[serviceIndex],
+        isActive: true,
+        updatedAt: new Date().toISOString()
+      };
+
+      staticServices[serviceIndex] = restoredService;
+
+      const transformedService = {
+        _id: restoredService.id,
+        name: restoredService.name,
+        description: restoredService.description,
+        category: restoredService.category.toLowerCase() as any,
+        price: restoredService.price,
+        duration: restoredService.duration,
+        code: restoredService.id,
+        isActive: restoredService.isActive,
+        notes: '',
+        createdAt: restoredService.createdAt,
+        updatedAt: restoredService.updatedAt
+      };
+
+      return {
+        success: true,
+        data: transformedService,
+        message: 'Servicio restaurado con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error restoring service:', error);
       throw error;
@@ -234,17 +365,38 @@ class DentalServicesService {
 
   async getServiceStats(): Promise<ServiceStatsResponse> {
     try {
-      const response = await fetch(`${API_BASE_URL}/services/stats/summary`, {
-        headers: authService.getAuthHeaders(),
+      // Modo estático - calcular estadísticas locales
+      const total = staticServices.length;
+      const active = staticServices.filter(s => s.isActive).length;
+      const inactive = total - active;
+
+      // Calcular estadísticas por categoría
+      const categoryStats: Record<string, { count: number; totalPrice: number }> = {};
+      
+      staticServices.forEach(service => {
+        const category = service.category.toLowerCase();
+        if (!categoryStats[category]) {
+          categoryStats[category] = { count: 0, totalPrice: 0 };
+        }
+        categoryStats[category].count++;
+        categoryStats[category].totalPrice += service.price;
       });
 
-      const data = await response.json();
+      const byCategory = Object.entries(categoryStats).map(([category, stats]) => ({
+        _id: category,
+        count: stats.count,
+        avgPrice: stats.totalPrice / stats.count
+      }));
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener estadísticas de servicios');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: {
+          total,
+          active,
+          inactive,
+          byCategory
+        }
+      };
     } catch (error) {
       console.error('Error fetching service stats:', error);
       throw error;

@@ -1,5 +1,6 @@
 import { authService } from './authService';
 import { Patient } from './patientService';
+import { staticAppointments, staticPatients, staticServices, staticTodayAppointments, staticDashboardStats } from '@/data/staticData';
 
 const API_BASE_URL = ((import.meta as any)?.env?.VITE_API_BASE_URL as string) || 'http://localhost:5000/api';
 
@@ -127,44 +128,25 @@ export interface AppointmentStatsResponse {
 class AppointmentService {
   async getDashboardData(params: { date?: string; status?: string; limit?: number } = {}): Promise<DashboardResponse> {
     try {
-      const queryParams = new URLSearchParams();
-      if (params.date) queryParams.append('date', params.date);
-      if (params.status) queryParams.append('status', params.status);
-      if (params.limit) queryParams.append('limit', params.limit.toString());
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 400));
+      
+      // Usar datos estáticos de citas de hoy
+      const todayAppointments = staticTodayAppointments.slice(0, params.limit || 5);
 
-      const response = await fetch(`${API_BASE_URL}/appointments/dashboard?${queryParams}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener datos del dashboard');
-      }
-
-      // Transform patient data to include fullName
-      if (data.data) {
-        if (data.data.todayAppointments) {
-          data.data.todayAppointments = data.data.todayAppointments.map((appointment: any) => ({
-            ...appointment,
-            patient: {
-              ...appointment.patient,
-              fullName: `${appointment.patient.firstName || ''} ${appointment.patient.lastName || ''}`.trim()
-            }
-          }));
+      return {
+        success: true,
+        data: {
+          todayAppointments,
+          upcomingAppointments: [],
+          stats: {
+            total: staticDashboardStats.appointments.today.total,
+            completed: staticDashboardStats.appointments.today.completed,
+            pending: staticDashboardStats.appointments.today.pending,
+            cancelled: 0
+          }
         }
-        if (data.data.upcomingAppointments) {
-          data.data.upcomingAppointments = data.data.upcomingAppointments.map((appointment: any) => ({
-            ...appointment,
-            patient: {
-              ...appointment.patient,
-              fullName: `${appointment.patient.firstName || ''} ${appointment.patient.lastName || ''}`.trim()
-            }
-          }));
-        }
-      }
-
-      return data;
+      };
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       throw error;
@@ -173,37 +155,89 @@ class AppointmentService {
 
   async getAppointments(params: GetAppointmentsParams = {}): Promise<GetAppointmentsResponse> {
     try {
-      const queryParams = new URLSearchParams();
-      if (params.page) queryParams.append('page', params.page.toString());
-      if (params.limit) queryParams.append('limit', params.limit.toString());
-      if (params.status) queryParams.append('status', params.status);
-      if (params.date) queryParams.append('date', params.date);
-      if (params.patientDni) queryParams.append('patientDni', params.patientDni);
-      if (params.dateFrom) queryParams.append('dateFrom', params.dateFrom);
-      if (params.dateTo) queryParams.append('dateTo', params.dateTo);
-
-      const response = await fetch(`${API_BASE_URL}/appointments?${queryParams}`, {
-        headers: authService.getAuthHeaders(),
+      let filteredAppointments = staticAppointments.map(apt => {
+        const patient = staticPatients.find(p => p.id === apt.patientId);
+        return {
+          _id: apt.id,
+          patient: {
+            _id: patient?.id || '',
+            dni: patient?.id || '',
+            firstName: patient?.firstName || '',
+            lastName: patient?.lastName || '',
+            fullName: `${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(),
+            email: patient?.email || '',
+            phone: patient?.phone || '',
+            address: {
+              street: patient?.address || '',
+              city: '',
+              state: '',
+              zipCode: '',
+              country: ''
+            },
+            dateOfBirth: patient?.dateOfBirth || '',
+            gender: (patient?.gender === 'Masculino' ? 'masculino' : patient?.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+            emergencyContact: patient?.emergencyContact,
+            medicalHistory: {
+              allergies: patient?.medicalHistory.allergies ? [patient.medicalHistory.allergies] : [],
+              medications: patient?.medicalHistory.medications ? [patient.medicalHistory.medications] : [],
+              diseases: patient?.medicalHistory.diseases ? [patient.medicalHistory.diseases] : [],
+              notes: patient?.medicalHistory.notes
+            },
+            isActive: true,
+            createdAt: patient?.createdAt || '',
+            updatedAt: patient?.updatedAt || ''
+          },
+          dentist: {
+            _id: '1',
+            fullName: 'Dr. Carlos Rodríguez'
+          },
+          services: [],
+          date: apt.date,
+          startTime: apt.time,
+          endTime: new Date(new Date(`${apt.date} ${apt.time}`).getTime() + apt.duration * 60000).toTimeString().slice(0, 5),
+          status: apt.status.toLowerCase() as any,
+          type: apt.type.toLowerCase() as any,
+          notes: apt.notes,
+          appliedServices: [],
+          payment: {
+            totalAmount: 0,
+            discount: 0,
+            finalAmount: 0,
+            isPaid: false
+          },
+          createdAt: apt.createdAt,
+          updatedAt: apt.updatedAt
+        };
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener citas');
+      if (params.status) {
+        filteredAppointments = filteredAppointments.filter(apt => apt.status === params.status);
+      }
+      if (params.date) {
+        filteredAppointments = filteredAppointments.filter(apt => apt.date === params.date);
+      }
+      if (params.patientDni) {
+        filteredAppointments = filteredAppointments.filter(apt => apt.patient.dni === params.patientDni);
       }
 
-      // Transform patient data to include fullName
-      if (data.data && data.data.appointments) {
-        data.data.appointments = data.data.appointments.map((appointment: any) => ({
-          ...appointment,
-          patient: {
-            ...appointment.patient,
-            fullName: `${appointment.patient.firstName || ''} ${appointment.patient.lastName || ''}`.trim()
+      const page = params.page || 1;
+      const limit = params.limit || 10;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedAppointments = filteredAppointments.slice(startIndex, endIndex);
+
+      return {
+        success: true,
+        data: {
+          appointments: paginatedAppointments,
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil(filteredAppointments.length / limit),
+            totalItems: filteredAppointments.length,
+            itemsPerPage: limit
           }
-        }));
-      }
-
-      return data;
+        }
+      };
     } catch (error) {
       console.error('Error fetching appointments:', error);
       throw error;
@@ -212,25 +246,68 @@ class AppointmentService {
 
   async getAppointmentById(id: string): Promise<{ success: boolean; data: Appointment }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/appointments/${id}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener cita');
+      const appointment = staticAppointments.find(apt => apt.id === id);
+      if (!appointment) {
+        throw new Error('Cita no encontrada');
       }
 
-      // Transform patient data to include fullName
-      if (data.data && data.data.patient) {
-        data.data.patient = {
-          ...data.data.patient,
-          fullName: `${data.data.patient.firstName || ''} ${data.data.patient.lastName || ''}`.trim()
-        };
-      }
+      const patient = staticPatients.find(p => p.id === appointment.patientId);
+      const transformedAppointment = {
+        _id: appointment.id,
+        patient: {
+          _id: patient?.id || '',
+          dni: patient?.id || '',
+          firstName: patient?.firstName || '',
+          lastName: patient?.lastName || '',
+          fullName: `${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(),
+          email: patient?.email || '',
+          phone: patient?.phone || '',
+          address: {
+            street: patient?.address || '',
+            city: '',
+            state: '',
+            zipCode: '',
+            country: ''
+          },
+          dateOfBirth: patient?.dateOfBirth || '',
+          gender: (patient?.gender === 'Masculino' ? 'masculino' : patient?.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+          emergencyContact: patient?.emergencyContact,
+          medicalHistory: {
+            allergies: patient?.medicalHistory.allergies ? [patient.medicalHistory.allergies] : [],
+            medications: patient?.medicalHistory.medications ? [patient.medicalHistory.medications] : [],
+            diseases: patient?.medicalHistory.diseases ? [patient.medicalHistory.diseases] : [],
+            notes: patient?.medicalHistory.notes
+          },
+          isActive: true,
+          createdAt: patient?.createdAt || '',
+          updatedAt: patient?.updatedAt || ''
+        },
+        dentist: {
+          _id: '1',
+          fullName: 'Dr. Carlos Rodríguez'
+        },
+        services: [],
+        date: appointment.date,
+        startTime: appointment.time,
+        endTime: new Date(new Date(`${appointment.date} ${appointment.time}`).getTime() + appointment.duration * 60000).toTimeString().slice(0, 5),
+        status: appointment.status.toLowerCase() as any,
+        type: appointment.type.toLowerCase() as any,
+        notes: appointment.notes,
+        appliedServices: [],
+        payment: {
+          totalAmount: 0,
+          discount: 0,
+          finalAmount: 0,
+          isPaid: false
+        },
+        createdAt: appointment.createdAt,
+        updatedAt: appointment.updatedAt
+      };
 
-      return data;
+      return {
+        success: true,
+        data: transformedAppointment
+      };
     } catch (error) {
       console.error('Error fetching appointment:', error);
       throw error;
@@ -239,36 +316,105 @@ class AppointmentService {
 
   async getAppointmentsByPatientDni(dni: string): Promise<{ success: boolean; data: { patient: Patient; appointments: Appointment[] } }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/appointments/by-patient-dni/${dni}`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al buscar citas por DNI');
+      // Modo estático - buscar citas por paciente
+      const patient = staticPatients.find(p => p.id === dni);
+      if (!patient) {
+        throw new Error('Paciente no encontrado');
       }
 
-      // Transform patient data to include fullName
-      if (data.data) {
-        if (data.data.patient) {
-          data.data.patient = {
-            ...data.data.patient,
-            fullName: `${data.data.patient.firstName || ''} ${data.data.patient.lastName || ''}`.trim()
-          };
-        }
-        if (data.data.appointments) {
-          data.data.appointments = data.data.appointments.map((appointment: any) => ({
-            ...appointment,
+      const appointments = staticAppointments
+        .filter(apt => apt.patientId === dni)
+        .map(apt => {
+          const patientData = staticPatients.find(p => p.id === apt.patientId);
+          return {
+            _id: apt.id,
             patient: {
-              ...appointment.patient,
-              fullName: `${appointment.patient.firstName || ''} ${appointment.patient.lastName || ''}`.trim()
-            }
-          }));
-        }
-      }
+              _id: patientData?.id || '',
+              dni: patientData?.id || '',
+              firstName: patientData?.firstName || '',
+              lastName: patientData?.lastName || '',
+              fullName: `${patientData?.firstName || ''} ${patientData?.lastName || ''}`.trim(),
+              email: patientData?.email || '',
+              phone: patientData?.phone || '',
+              address: {
+                street: patientData?.address || '',
+                city: '',
+                state: '',
+                zipCode: '',
+                country: ''
+              },
+              dateOfBirth: patientData?.dateOfBirth || '',
+              gender: (patientData?.gender === 'Masculino' ? 'masculino' : patientData?.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+              emergencyContact: patientData?.emergencyContact,
+              medicalHistory: {
+                allergies: patientData?.medicalHistory.allergies ? [patientData.medicalHistory.allergies] : [],
+                medications: patientData?.medicalHistory.medications ? [patientData.medicalHistory.medications] : [],
+                diseases: patientData?.medicalHistory.diseases ? [patientData.medicalHistory.diseases] : [],
+                notes: patientData?.medicalHistory.notes
+              },
+              isActive: true,
+              createdAt: patientData?.createdAt || '',
+              updatedAt: patientData?.updatedAt || ''
+            },
+            dentist: {
+              _id: '1',
+              fullName: 'Dr. Carlos Rodríguez'
+            },
+            services: [],
+            date: apt.date,
+            startTime: apt.time,
+            endTime: new Date(new Date(`${apt.date} ${apt.time}`).getTime() + apt.duration * 60000).toTimeString().slice(0, 5),
+            status: apt.status.toLowerCase() as any,
+            type: apt.type.toLowerCase() as any,
+            notes: apt.notes,
+            appliedServices: [],
+            payment: {
+              totalAmount: 0,
+              discount: 0,
+              finalAmount: 0,
+              isPaid: false
+            },
+            createdAt: apt.createdAt,
+            updatedAt: apt.updatedAt
+          };
+        });
 
-      return data;
+      const transformedPatient = {
+        _id: patient.id,
+        dni: patient.id,
+        firstName: patient.firstName,
+        lastName: patient.lastName,
+        fullName: `${patient.firstName} ${patient.lastName}`,
+        email: patient.email,
+        phone: patient.phone,
+        address: {
+          street: patient.address,
+          city: '',
+          state: '',
+          zipCode: '',
+          country: ''
+        },
+        dateOfBirth: patient.dateOfBirth,
+        gender: (patient.gender === 'Masculino' ? 'masculino' : patient.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+        emergencyContact: patient.emergencyContact,
+        medicalHistory: {
+          allergies: patient.medicalHistory.allergies ? [patient.medicalHistory.allergies] : [],
+          medications: patient.medicalHistory.medications ? [patient.medicalHistory.medications] : [],
+          diseases: patient.medicalHistory.diseases ? [patient.medicalHistory.diseases] : [],
+          notes: patient.medicalHistory.notes
+        },
+        isActive: true,
+        createdAt: patient.createdAt,
+        updatedAt: patient.updatedAt
+      };
+
+      return {
+        success: true,
+        data: {
+          patient: transformedPatient,
+          appointments
+        }
+      };
     } catch (error) {
       console.error('Error fetching appointments by DNI:', error);
       throw error;
@@ -277,19 +423,84 @@ class AppointmentService {
 
   async createAppointment(appointmentData: CreateAppointmentRequest): Promise<{ success: boolean; data: Appointment; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/appointments`, {
-        method: 'POST',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(appointmentData),
-      });
+      // Modo estático - crear cita en datos locales
+      const newId = (Math.max(...staticAppointments.map(a => parseInt(a.id))) + 1).toString();
+      const now = new Date().toISOString();
+      
+      const newAppointment = {
+        id: newId,
+        patientId: appointmentData.patient,
+        patientName: 'Paciente Nuevo', // Se podría buscar el nombre del paciente
+        date: appointmentData.date,
+        time: appointmentData.startTime,
+        duration: 60, // Duración por defecto
+        type: appointmentData.type || 'consulta',
+        status: 'Programada',
+        notes: appointmentData.notes,
+        createdAt: now,
+        updatedAt: now
+      };
+      
+      staticAppointments.push(newAppointment);
 
-      const data = await response.json();
+      const patient = staticPatients.find(p => p.id === appointmentData.patient);
+      const transformedAppointment = {
+        _id: newAppointment.id,
+        patient: {
+          _id: patient?.id || '',
+          dni: patient?.id || '',
+          firstName: patient?.firstName || '',
+          lastName: patient?.lastName || '',
+          fullName: `${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(),
+          email: patient?.email || '',
+          phone: patient?.phone || '',
+          address: {
+            street: patient?.address || '',
+            city: '',
+            state: '',
+            zipCode: '',
+            country: ''
+          },
+          dateOfBirth: patient?.dateOfBirth || '',
+          gender: (patient?.gender === 'Masculino' ? 'masculino' : patient?.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+          emergencyContact: patient?.emergencyContact,
+          medicalHistory: {
+            allergies: patient?.medicalHistory.allergies ? [patient.medicalHistory.allergies] : [],
+            medications: patient?.medicalHistory.medications ? [patient.medicalHistory.medications] : [],
+            diseases: patient?.medicalHistory.diseases ? [patient.medicalHistory.diseases] : [],
+            notes: patient?.medicalHistory.notes
+          },
+          isActive: true,
+          createdAt: patient?.createdAt || '',
+          updatedAt: patient?.updatedAt || ''
+        },
+        dentist: {
+          _id: '1',
+          fullName: 'Dr. Carlos Rodríguez'
+        },
+        services: [],
+        date: newAppointment.date,
+        startTime: newAppointment.time,
+        endTime: new Date(new Date(`${newAppointment.date} ${newAppointment.time}`).getTime() + 60 * 60000).toTimeString().slice(0, 5),
+        status: newAppointment.status.toLowerCase() as any,
+        type: newAppointment.type.toLowerCase() as any,
+        notes: newAppointment.notes,
+        appliedServices: [],
+        payment: {
+          totalAmount: 0,
+          discount: 0,
+          finalAmount: 0,
+          isPaid: false
+        },
+        createdAt: newAppointment.createdAt,
+        updatedAt: newAppointment.updatedAt
+      };
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al crear cita');
-      }
-
-      return data;
+      return {
+        success: true,
+        data: transformedAppointment,
+        message: 'Cita creada con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error creating appointment:', error);
       throw error;
@@ -298,19 +509,79 @@ class AppointmentService {
 
   async updateAppointment(id: string, appointmentData: Partial<CreateAppointmentRequest>): Promise<{ success: boolean; data: Appointment; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/appointments/${id}`, {
-        method: 'PUT',
-        headers: authService.getAuthHeaders(),
-        body: JSON.stringify(appointmentData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al actualizar cita');
+      // Modo estático - actualizar cita en datos locales
+      const appointmentIndex = staticAppointments.findIndex(apt => apt.id === id);
+      
+      if (appointmentIndex === -1) {
+        throw new Error('Cita no encontrada');
       }
 
-      return data;
+      const updatedAppointment = {
+        ...staticAppointments[appointmentIndex],
+        ...appointmentData,
+        updatedAt: new Date().toISOString()
+      };
+
+      staticAppointments[appointmentIndex] = updatedAppointment;
+
+      const patient = staticPatients.find(p => p.id === updatedAppointment.patientId);
+      const transformedAppointment = {
+        _id: updatedAppointment.id,
+        patient: {
+          _id: patient?.id || '',
+          dni: patient?.id || '',
+          firstName: patient?.firstName || '',
+          lastName: patient?.lastName || '',
+          fullName: `${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(),
+          email: patient?.email || '',
+          phone: patient?.phone || '',
+          address: {
+            street: patient?.address || '',
+            city: '',
+            state: '',
+            zipCode: '',
+            country: ''
+          },
+          dateOfBirth: patient?.dateOfBirth || '',
+          gender: (patient?.gender === 'Masculino' ? 'masculino' : patient?.gender === 'Femenino' ? 'femenino' : 'otro') as 'masculino' | 'femenino' | 'otro',
+          emergencyContact: patient?.emergencyContact,
+          medicalHistory: {
+            allergies: patient?.medicalHistory.allergies ? [patient.medicalHistory.allergies] : [],
+            medications: patient?.medicalHistory.medications ? [patient.medicalHistory.medications] : [],
+            diseases: patient?.medicalHistory.diseases ? [patient.medicalHistory.diseases] : [],
+            notes: patient?.medicalHistory.notes
+          },
+          isActive: true,
+          createdAt: patient?.createdAt || '',
+          updatedAt: patient?.updatedAt || ''
+        },
+        dentist: {
+          _id: '1',
+          fullName: 'Dr. Carlos Rodríguez'
+        },
+        services: [],
+        date: updatedAppointment.date,
+        startTime: updatedAppointment.time,
+        endTime: new Date(new Date(`${updatedAppointment.date} ${updatedAppointment.time}`).getTime() + updatedAppointment.duration * 60000).toTimeString().slice(0, 5),
+        status: updatedAppointment.status.toLowerCase() as any,
+        type: updatedAppointment.type.toLowerCase() as any,
+        notes: updatedAppointment.notes,
+        appliedServices: [],
+        payment: {
+          totalAmount: 0,
+          discount: 0,
+          finalAmount: 0,
+          isPaid: false
+        },
+        createdAt: updatedAppointment.createdAt,
+        updatedAt: updatedAppointment.updatedAt
+      };
+
+      return {
+        success: true,
+        data: transformedAppointment,
+        message: 'Cita actualizada con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error updating appointment:', error);
       throw error;
@@ -319,18 +590,19 @@ class AppointmentService {
 
   async deleteAppointment(id: string): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/appointments/${id}`, {
-        method: 'DELETE',
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al cancelar cita');
+      // Modo estático - eliminar cita de datos locales
+      const appointmentIndex = staticAppointments.findIndex(apt => apt.id === id);
+      
+      if (appointmentIndex === -1) {
+        throw new Error('Cita no encontrada');
       }
 
-      return data;
+      staticAppointments.splice(appointmentIndex, 1);
+
+      return {
+        success: true,
+        message: 'Cita eliminada con éxito (modo estático)'
+      };
     } catch (error) {
       console.error('Error deleting appointment:', error);
       throw error;
@@ -339,17 +611,22 @@ class AppointmentService {
 
   async getAppointmentStats(): Promise<AppointmentStatsResponse> {
     try {
-      const response = await fetch(`${API_BASE_URL}/appointments/stats/summary`, {
-        headers: authService.getAuthHeaders(),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Error al obtener estadísticas de citas');
-      }
-
-      return data;
+      // Simular delay de red
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Usar datos estáticos del dashboard
+      return {
+        success: true,
+        data: {
+          today: {
+            total: staticDashboardStats.appointments.today.total,
+            completed: staticDashboardStats.appointments.today.completed,
+            pending: staticDashboardStats.appointments.today.pending
+          },
+          upcomingWeek: staticDashboardStats.appointments.upcomingWeek,
+          totalMonth: staticDashboardStats.appointments.upcomingWeek
+        }
+      };
     } catch (error) {
       console.error('Error fetching appointment stats:', error);
       throw error;
